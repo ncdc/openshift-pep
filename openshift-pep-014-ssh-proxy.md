@@ -29,7 +29,7 @@ The SSH proxy is comprised of the following pieces:
 - a custom AuthorizedKeysCommand
 - a custom executable to perform the proxying logic, with plugins to support different backend resources
 
-The SSH proxy is essentially stateless, meaning multiple proxies can exist behind a load balancer and/or something like round-robin DNS. Doing so eliminates the proxy layer from being a single point of failure.
+The SSH proxy is stateless, in as much as multiple proxies can exist behind a load balancer and/or something like round-robin DNS. Doing so eliminates the proxy layer from being a single point of failure.
 
 --
 
@@ -62,7 +62,7 @@ where $user is the login for that particular person and $repo specifies the Git 
 
 #### Steps 2 & 3: retrieve user's authorized keys
 
-The proxy configures `sshd` to use a custom `AuthorizedKeysCommand` to look up public keys for $user. This command runs as the user specified by `AuthorizedKeysCommandUser` - this user should only be used to perform this action. The custom `AuthorizedKeysCommand` makes a secure request to OpenShift to retrieve the public keys. The reason this command must run as a separate user is so that only this user is allowed to query OpenShift for the public keys for whatever user is requesting access. The `AuthorizedKeysCommandUser` has the appropriate permissions to ask OpenShift for public keys for all users (via a private SSL client certificate, a private token, or any other private means).
+The proxy configures `sshd` to use a custom `AuthorizedKeysCommand` to look up public keys for $user. This command runs as the user specified by `AuthorizedKeysCommandUser` - this user should only be used to perform this action. The custom `AuthorizedKeysCommand` makes a secure request to OpenShift to retrieve the public keys. This command is run as a isolated user to ensure only this user is allowed to query OpenShift for the public keys for which ever original user is requesting access. The `AuthorizedKeysCommandUser` has the appropriate permissions to ask OpenShift for public keys for all users (via a private SSL client certificate, a private token, or any other private means).
 
 OpenShift returns a list of the public keys for the user in question, along with
 
@@ -78,10 +78,10 @@ After the user has successfully logged in, `sshd` executes the command specified
 #### Steps 6 & 7: determine and execute backend plugin
 The proxy examines `$SSH_ORIGINAL_COMMAND` to determine which backend plugin should handle the remainder of the session. In this example, the command is `git-upload-pack`, which is handled by the Git backend plugin.
 
-Other backend plugins will perform different logic from this point forward. The steps below illustrate what the Git plugin does.
+Other backend plugins will perform different logic from this point forward. The steps below illustrate what the Git plugin workflow.
 
 #### Step 8: determine backend resource
-The Git plugin looks at `$SSH_ORIGINAL_COMMAND` to see what repo is being requested. The plugin then asks OpenShift for the URL of the backend pod where the repo lives.
+The Git plugin parses `$SSH_ORIGINAL_COMMAND` to determine which repo is being requested. The plugin then asks OpenShift for the URL of the backend pod where the repo lives.
 
 #### Step 9: generate short-lived key
 A user must only be allowed to access backend resources for which he/she has authorization. The user uses something only he/she knows (in this case, a private key) to authenticate to `sshd` in the proxy server, but once that happens, that piece of private data is not available in the proxy server itself (since the private key should only exist on the user's computer).
@@ -91,7 +91,7 @@ At this point, the SSH proxy needs to act as the user's agent to access a backen
 To mitigate this, the proxy creates a new SSH key pair for use solely with the current session.
 
 #### Step 10: upload short-lived key to OpenShift
-The plugin attempts to upload the short-lived public key to OpenShift using the `$USER_REF` environment variable that was set as part of the authorized keys lookup above. This short-lived key grants the SSH proxy access to a specific backend resource for a very short amount of time. After the short-lived key has expired, OpenShift removes it automatically.
+The plugin attempts to upload the short-lived public key to OpenShift using the `$USER_REF` environment variable that was set as part of the authorized keys lookup above. This short-lived key grants the SSH proxy access to a specific backend resource for a fixed amount of time. After the key's time-to-live has expired, OpenShift removes it automatically.
 
 OpenShift checks to see if the user is allowed to access the specified Git repository. If so, OpenShift stores the key. If not, OpenShift returns an error to the plugin, and the plugin halts execution and returns the error to the user.
 
@@ -134,6 +134,7 @@ While the `/etc/passwd` file has less setup overhead than something like LDAP, e
 
 ### MCS label assignment
 TODO
+- ??? Mapping UID's from getpwnam() to SELinux context range, a la OpenShift v1|v2?
 
 ### Changes to OpenShift API
 - need to be able to store/retrieve public keys for users
