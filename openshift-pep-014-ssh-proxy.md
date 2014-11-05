@@ -3,7 +3,7 @@ Title: OpenShift 3 SSH Proxy
 Status: draft  
 Author: Andy Goldstein <agoldste@redhat.com>  
 Arch Priority: medium  
-Complexity: 20  
+Complexity: 40  
 Affected Components: apiserver  
 Affected Teams: Runtime, Infrastructure  
 User Impact: low  
@@ -62,7 +62,7 @@ where $user is the login for that particular person and $repo specifies the Git 
 
 #### Steps 2 & 3: retrieve user's authorized keys
 
-The proxy configures `sshd` to use a custom `AuthorizedKeysCommand` to look up public keys for $user. This command runs as the user specified by `AuthorizedKeysCommandUser` - this user should only be used to perform this action. The custom `AuthorizedKeysCommand` makes a secure request to OpenShift to retrieve the public keys. This command is run as a isolated user to ensure only this user is allowed to query OpenShift for the public keys for which ever original user is requesting access. The `AuthorizedKeysCommandUser` has the appropriate permissions to ask OpenShift for public keys for all users (via a private SSL client certificate, a private token, or any other private means).
+The proxy configures `sshd` to use a custom `AuthorizedKeysCommand` to look up public keys for $user. This command runs as the user specified by `AuthorizedKeysCommandUser` - this user should only be used to perform this action. The custom `AuthorizedKeysCommand` makes a secure request to OpenShift to retrieve the public keys. This command is run as an isolated user to ensure only this user is allowed to query OpenShift for the public keys for which ever original user is requesting access. The `AuthorizedKeysCommandUser` has the appropriate permissions to ask OpenShift for public keys for all users (via a private SSL client certificate, a private token, or any other private means).
 
 OpenShift returns a list of the public keys for the user in question, along with
 
@@ -133,15 +133,18 @@ sshd requires that all users exist in the passwd database; more specifically, it
 While the `/etc/passwd` file has less setup overhead than something like LDAP, especially for small deployments, this file would need to be updated any time a user is added or removed to OpenShift's user database.
 
 ### MCS label assignment
-TODO
+
 - ??? Mapping UID's from getpwnam() to SELinux context range, a la OpenShift v1|v2?
 
 ### Changes to OpenShift API
+- add GitRepository type/registry/rest
 - need to be able to store/retrieve public keys for users
 - need to be able to store/retrieve short-lived keys, scoped to a specific resource
 
 ### SSSD integration?
-TODO
+Consider using SSSD in the SSH proxy container and the various backend containers (Git, etc.) to cache public keys.
+
+Question: we don't really want to cache the short-lived keys, do we?
 
 ### Kerberos for authentication
 TODO
@@ -150,16 +153,21 @@ TODO
 TODO
 
 ### Git repository provisioning & management
-TODO
+A custom controller running in a Git backend pod watches the apiserver for new GitRepositories and creates the appropriate directories and files for the new repository.
+
+If using `/etc/passwd`, the controller also adds an entry for the repository user to that file.
+
+The controller could either run in the background in the same Git backend container that is running `sshd`, or it could run in a separate container that is part of the same pod, as long as the appropriate files and directories are shared between the containers (`/etc/passwd` and the base directory for all the git repositories, e.g. `/var/lib/git`).
+
+### Recovery process
+If a Git backend pod is lost unexpectedly, there must be a process to create a new pod to assume the duties of the previous one. The ideal way to handle this is to define a ReplicationController for the pod, and let OpenShift (Kubernetes) ensure the replica count is maintained at 1. If the pod dies, a replacement is created automatically as part of the replication controller functionality.
+
+If the repository users are stored in `/etc/passwd`, this file must be bootstrapped appropriately.
+
+The repositories themselves must be attached to the new Git backend container. This presumably will be handled as part of the replication controller replacement process. The repositories should be stored on a volume that can be detached from the lost pod and attached to the new one.
 
 ### Non-human access to project resources
 TODO
 - Can I from the UI add any ssh public key or token as having access to my git repo?
 - How to map the key back to a user?
 - Desire is to be able to give a non-human access to a project's resources
-
-Rationale
----------
-*The technical rationale fleshes out the specification by describing what motivated the design and why particular design decisions were made. It should describe alternate designs that were considered and related work, e.g. how the feature is supported in other products.*
-
-*The rationale should provide evidence of consensus within the community and discuss important objections or concerns raised during discussion.*
