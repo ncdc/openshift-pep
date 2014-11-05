@@ -133,8 +133,10 @@ sshd requires that all users exist in the passwd database; more specifically, it
 While the `/etc/passwd` file has less setup overhead than something like LDAP, especially for small deployments, this file would need to be updated any time a user is added or removed to OpenShift's user database.
 
 ### MCS label assignment
+Distinct users in a multi-tenant environment (SSH proxy container, Git backend container, etc.) should not be allowed to view each others' files. Giving each Linux user's its own SELinux context and setting the exeuction context of a user's processes provides this inter-user isolation.
 
-- ??? Mapping UID's from getpwnam() to SELinux context range, a la OpenShift v1|v2?
+OpenShift 2 uses a custom PAM module, [pam_openshift](https://github.com/openshift/origin-server/tree/master/pam_openshift), to set the SELinux context when a user interacts with a gear via SSH. OpenShift 3 could continue to use this module, or it might be possible to use `pam_selinux` and the custom dynamic environment variable PAM module described below to set `SELINUX_LEVEL_REQUESTED` above `pam_selinux` in the PAM stack.
+
 
 ### Changes to OpenShift API
 - add GitRepository type/registry/rest
@@ -150,7 +152,9 @@ Question: we don't really want to cache the short-lived keys, do we?
 TODO
 
 ### Token ("password") for authentication
-TODO
+If a user wants to provide a token for password authentication, there needs to be a way to set the `$USER_REF` environment variable. The only secure option that comes to mind is to write a new PAM module that queries OpenShift for the `$USER_REF` based on the user's login and sets the environment variable using a call to `pam_putenv`.
+
+This method could be used for both public key and password authentication for consistency.
 
 ### Git repository provisioning & management
 A custom controller running in a Git backend pod watches the apiserver for new GitRepositories and creates the appropriate directories and files for the new repository.
