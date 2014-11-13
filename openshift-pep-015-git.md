@@ -53,17 +53,22 @@ Clients may be real users or service accounts. Tokens and client certificates ma
 
 ### Git repostiory authorization
 After the proxy authenticates the client, it verifies the client is authorized to access the Git repository by querying the OpenShift master. If authorization succeeds, the proxy determines the internal URL of the Git backend (again, by asking the OpenShift master). It then forwards the request to the Git backend.
+	- If the client is authorized the response should include the internal URL, saving a round trip to the master
 
 ### Git backend pod
-The Git backend pod runs a container capable of handling Git requests using Git's "smart HTTP" protocol. When it receives a requested forward from the proxy, it first repeats the same authentication and authorization checks as the proxy. This may be achieved via a container acting as a proxy inside the Git backend pod, or in the same container that handles the smart HTTP requests.
+The Git backend pod runs an OpenShift-provided container capable of handling Git requests using Git's "smart HTTP" protocol. When it receives a requested forward from the proxy, it first repeats the same authentication and authorization checks as the proxy. This may be achieved via a container acting as a proxy inside the Git backend pod, or in the same container that handles the smart HTTP requests.
 
 ### Git repository provisioning & management
 A custom controller running in a Git backend pod watches the OpenShift master for new GitRepositories and creates a new Linux user and the appropriate directories and files for the new repository.
+	- ??? The Linux user uid and gid are (or are not) unique across the OpenShift PaaS
+	- ??? Where does the range of uid/gid's come from?
 
 The controller could either run in the background in the same Git backend container that is running the smart HTTP server, or it could run in a separate container that is part of the same pod, as long as the appropriate files and directories are shared between the containers (`/etc/passwd` and the base directory for all the git repositories, e.g. `/var/lib/git`).
+	- Note: this does leak uid/gid information in that same manner as OpenShift v2.
 
 ### Quotas
 Each repository is assigned its own quota. Administrators should be able to configure the default quota value in the OpenShift master. Users may be able to request additional quota on a per repository basis.
+	- Implies the filesystem on /var/lib/git has quota support and may require specialized tooling
 
 ### Hooks
 TODO
@@ -81,6 +86,7 @@ With multiple repositories from different projects housed side by side in a Git 
 Authentication and authorization checks are performed in both the HTTPS proxy and the Git backend.
 
 Giving each Git user/repository (directory and descendent files) a unique MCS label and setting the execution context of each request appropriately can provide inter-repository isolation.
+	- setting the execution context to the user implies the connection to the Git backend pod starts in the root context
 
 ### SSH access
 Accessing Git repositories via SSH can be accomplished with an SSH proxy that sits beside the HTTPS proxy. The SSH proxy handles URLs such as `<user>@git.openshift.com:<project>/<repo>`.
